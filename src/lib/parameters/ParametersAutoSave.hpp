@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2019 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2020 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,21 +31,32 @@
  *
  ****************************************************************************/
 
-#include <px4_platform_common/init.h>
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/defines.h>
-#include <drivers/drv_hrt.h>
-#include <lib/parameters/param.h>
-#include <px4_platform_common/px4_work_queue/WorkQueueManager.hpp>
+#pragma once
 
-int px4_platform_init()
+#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
+
+/**
+ * Automatically save the parameters after a timeout and limited rate.
+ *
+ * This needs to be called with the writer lock held (it's not necessary that it's the writer lock, but it
+ * needs to be the same lock as autosave_worker() and param_control_autosave() use).
+ */
+
+class ParametersAutoSave : public px4::ScheduledWorkItem
 {
-	hrt_init();
+public:
+	ParametersAutoSave() : px4::ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::hp_default) {}
+	virtual ~ParametersAutoSave() = default;
 
-	px4::WorkQueueManagerStart();
+	float last_autosave_elapsed() const;
 
-	// requires WQ for auto save
-	param_init();
+	static void AutoSave();
+	static bool Enable(bool enable = true);
 
-	return PX4_OK;
-}
+	static void print_status();
+
+private:
+	hrt_abstime _last_autosave_timestamp{0};
+
+	void Run() override;
+};
