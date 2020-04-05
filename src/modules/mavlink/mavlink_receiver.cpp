@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2012-2019 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2020 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -73,6 +73,13 @@
 
 using matrix::wrap_2pi;
 
+MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
+	ModuleParams(parent),
+	_mavlink(parent),
+	_mavlink_timesync(parent)
+{
+}
+
 MavlinkReceiver::~MavlinkReceiver()
 {
 	delete _tune_publisher;
@@ -82,19 +89,7 @@ MavlinkReceiver::~MavlinkReceiver()
 	delete _px4_mag;
 }
 
-MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
-	ModuleParams(nullptr),
-	_mavlink(parent),
-	_mavlink_ftp(parent),
-	_mavlink_log_handler(parent),
-	_mission_manager(parent),
-	_parameters_manager(parent),
-	_mavlink_timesync(parent)
-{
-}
-
-void
-MavlinkReceiver::acknowledge(uint8_t sysid, uint8_t compid, uint16_t command, uint8_t result)
+void MavlinkReceiver::acknowledge(uint8_t sysid, uint8_t compid, uint16_t command, uint8_t result)
 {
 	vehicle_command_ack_s command_ack{};
 
@@ -531,7 +526,7 @@ uint8_t MavlinkReceiver::handle_request_message_command(uint16_t message_id, flo
 		const char *stream_name = get_stream_name(message_id);
 
 		if (stream_name != nullptr) {
-			_mavlink->configure_stream_threadsafe(stream_name, 0.0f);
+			_mavlink->configure_stream(stream_name, 0.0f);
 
 			// Now we try again to send it.
 			for (const auto &stream : _mavlink->get_streams()) {
@@ -2085,8 +2080,6 @@ MavlinkReceiver::handle_message_heartbeat(mavlink_message_t *msg)
 			}
 
 			if (heartbeat_slot_found) {
-				_mavlink->lock_telemetry_status();
-
 				tstatus.heartbeats[heartbeat_slot].timestamp = now;
 				tstatus.heartbeats[heartbeat_slot].system_id = msg->sysid;
 				tstatus.heartbeats[heartbeat_slot].component_id = msg->compid;
@@ -2094,7 +2087,6 @@ MavlinkReceiver::handle_message_heartbeat(mavlink_message_t *msg)
 				tstatus.heartbeats[heartbeat_slot].state = hb.system_status;
 
 				_mavlink->telemetry_status_updated();
-				_mavlink->unlock_telemetry_status();
 
 			} else {
 				PX4_ERR("no telemetry heartbeat slots available");
@@ -2133,7 +2125,7 @@ MavlinkReceiver::set_message_interval(int msgId, float interval, int data_rate)
 		const char *stream_name = get_stream_name(msgId);
 
 		if (stream_name != nullptr) {
-			_mavlink->configure_stream_threadsafe(stream_name, rate);
+			_mavlink->configure_stream(stream_name, rate);
 			found_id = true;
 		}
 	}
@@ -2783,19 +2775,8 @@ void MavlinkReceiver::handle_message_statustext(mavlink_message_t *msg)
 	}
 }
 
-/**
- * Receive data from UART/UDP
- */
-void
-MavlinkReceiver::Run()
+void MavlinkReceiver::update()
 {
-	/* set thread name */
-	{
-		char thread_name[17];
-		snprintf(thread_name, sizeof(thread_name), "mavlink_rcv_if%d", _mavlink->get_instance_id());
-		px4_prctl(PR_SET_NAME, thread_name, px4_getpid());
-	}
-
 	// make sure mavlink app has booted before we start processing anything (parameter sync, etc)
 	while (!_mavlink->boot_complete()) {
 		if (hrt_elapsed_time(&_mavlink->get_first_start_time()) > 20_s) {
@@ -2803,200 +2784,116 @@ MavlinkReceiver::Run()
 			_mavlink->set_boot_complete();
 		}
 
-		px4_usleep(100000);
+		return;
 	}
 
-	// poll timeout in ms. Also defines the max update frequency of the mission & param manager, etc.
-	const int timeout = 10;
+	// check for parameter updates
+	if (_parameter_update_sub.updated()) {
+		// clear update
+		parameter_update_s pupdate;
+		_parameter_update_sub.copy(&pupdate);
+
+		// update parameters from storage
+		updateParams();
+	}
 
 #if defined(__PX4_POSIX)
 	/* 1500 is the Wifi MTU, so we make sure to fit a full packet */
 	uint8_t buf[1600 * 5];
-#elif defined(CONFIG_NET)
+#elif defined(__PX4_NUTTX) && defined(CONFIG_NET)
 	/* 1500 is the Wifi MTU, so we make sure to fit a full packet */
-	uint8_t buf[1000];
+	uint8_t buf[1500];
 #else
 	/* the serial port buffers internally as well, we just need to fit a small chunk */
 	uint8_t buf[64];
 #endif
-	mavlink_message_t msg;
 
-	struct pollfd fds[1] = {};
+	mavlink_message_t msg;
+	ssize_t nread = 0;
 
 	if (_mavlink->get_protocol() == Protocol::SERIAL) {
-		fds[0].fd = _mavlink->get_uart_fd();
-		fds[0].events = POLLIN;
+
+		// Check the number of bytes available in the buffer
+		int bytes_available = 0;
+		::ioctl(_mavlink->get_uart_fd(), FIONREAD, (unsigned long)&bytes_available);
+
+		// to avoid reading very small chunks wait for data before reading
+		// this is designed to target one message, so >20 bytes at a time
+		static constexpr int character_count = 20;
+
+		if (bytes_available > character_count) {
+			// non-blocking read. read may return negative values
+			nread = ::read(_mavlink->get_uart_fd(), buf, sizeof(buf));
+		}
 	}
 
 #if defined(MAVLINK_UDP)
-	struct sockaddr_in srcaddr = {};
-	socklen_t addrlen = sizeof(srcaddr);
 
-	if (_mavlink->get_protocol() == Protocol::UDP) {
-		fds[0].fd = _mavlink->get_socket_fd();
-		fds[0].events = POLLIN;
+	else if (_mavlink->get_protocol() == Protocol::UDP) {
+		struct sockaddr_in srcaddr {};
+		socklen_t addrlen = sizeof(srcaddr);
+
+		nread = recvfrom(_mavlink->get_socket_fd(), buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&srcaddr, &addrlen);
+
+		if (!_mavlink->get_client_source_initialized()) {
+
+			// set the address either if localhost or if 3 seconds have passed
+			// this ensures that a GCS running on localhost can get a hold of
+			// the system within the first N seconds
+			hrt_abstime stime = _mavlink->get_start_time();
+
+			struct sockaddr_in &srcaddr_last = _mavlink->get_client_source_address();
+			int localhost = (127 << 24) + 1;
+
+			if ((stime != 0 && (hrt_elapsed_time(&stime) > 3_s))
+			    || (srcaddr_last.sin_addr.s_addr == htonl(localhost))) {
+
+				srcaddr_last.sin_addr.s_addr = srcaddr.sin_addr.s_addr;
+				srcaddr_last.sin_port = srcaddr.sin_port;
+
+				_mavlink->set_client_source_initialized();
+
+				PX4_INFO("partner IP: %s", inet_ntoa(srcaddr.sin_addr));
+			}
+		}
+	}
+
+	// only start accepting messages on UDP once we're sure who we talk to
+	if (_mavlink->get_protocol() != Protocol::UDP || _mavlink->get_client_source_initialized()) {
+#endif // MAVLINK_UDP
+
+		/* if read failed, this loop won't execute */
+		for (ssize_t i = 0; i < nread; i++) {
+			if (mavlink_parse_char(_mavlink->get_channel(), buf[i], &msg, &_status)) {
+
+				/* check if we received version 2 and request a switch. */
+				if (!(_mavlink->get_status()->flags & MAVLINK_STATUS_FLAG_IN_MAVLINK1)) {
+					/* this will only switch to proto version 2 if allowed in settings */
+					_mavlink->set_proto_version(2);
+				}
+
+				/* handle generic messages and commands */
+				handle_message(&msg);
+
+				/* handle packet with timesync component */
+				_mavlink_timesync.handle_message(&msg);
+
+				/* handle packet with parent object */
+				_mavlink->handle_message(&msg);
+			}
+		}
+
+		/* count received bytes (nread will be -1 on read error) */
+		if (nread > 0) {
+			_mavlink->count_rxbytes(nread);
+		}
+
+#if defined(MAVLINK_UDP)
 	}
 
 #endif // MAVLINK_UDP
 
-	ssize_t nread = 0;
-	hrt_abstime last_send_update = 0;
-
-	while (!_mavlink->_task_should_exit) {
-
-		// check for parameter updates
-		if (_parameter_update_sub.updated()) {
-			// clear update
-			parameter_update_s pupdate;
-			_parameter_update_sub.copy(&pupdate);
-
-			// update parameters from storage
-			updateParams();
-		}
-
-		int ret = poll(&fds[0], 1, timeout);
-
-		if (ret > 0) {
-			if (_mavlink->get_protocol() == Protocol::SERIAL) {
-				/* non-blocking read. read may return negative values */
-				nread = ::read(fds[0].fd, buf, sizeof(buf));
-
-				if (nread == -1 && errno == ENOTCONN) { // Not connected (can happen for USB)
-					usleep(100000);
-				}
-			}
-
-#if defined(MAVLINK_UDP)
-
-			else if (_mavlink->get_protocol() == Protocol::UDP) {
-				if (fds[0].revents & POLLIN) {
-					nread = recvfrom(_mavlink->get_socket_fd(), buf, sizeof(buf), 0, (struct sockaddr *)&srcaddr, &addrlen);
-				}
-
-				struct sockaddr_in &srcaddr_last = _mavlink->get_client_source_address();
-
-				int localhost = (127 << 24) + 1;
-
-				if (!_mavlink->get_client_source_initialized()) {
-
-					// set the address either if localhost or if 3 seconds have passed
-					// this ensures that a GCS running on localhost can get a hold of
-					// the system within the first N seconds
-					hrt_abstime stime = _mavlink->get_start_time();
-
-					if ((stime != 0 && (hrt_elapsed_time(&stime) > 3_s))
-					    || (srcaddr_last.sin_addr.s_addr == htonl(localhost))) {
-
-						srcaddr_last.sin_addr.s_addr = srcaddr.sin_addr.s_addr;
-						srcaddr_last.sin_port = srcaddr.sin_port;
-
-						_mavlink->set_client_source_initialized();
-
-						PX4_INFO("partner IP: %s", inet_ntoa(srcaddr.sin_addr));
-					}
-				}
-			}
-
-			// only start accepting messages on UDP once we're sure who we talk to
-			if (_mavlink->get_protocol() != Protocol::UDP || _mavlink->get_client_source_initialized()) {
-#endif // MAVLINK_UDP
-
-				/* if read failed, this loop won't execute */
-				for (ssize_t i = 0; i < nread; i++) {
-					if (mavlink_parse_char(_mavlink->get_channel(), buf[i], &msg, &_status)) {
-
-						/* check if we received version 2 and request a switch. */
-						if (!(_mavlink->get_status()->flags & MAVLINK_STATUS_FLAG_IN_MAVLINK1)) {
-							/* this will only switch to proto version 2 if allowed in settings */
-							_mavlink->set_proto_version(2);
-						}
-
-						/* handle generic messages and commands */
-						handle_message(&msg);
-
-						/* handle packet with mission manager */
-						_mission_manager.handle_message(&msg);
-
-
-						/* handle packet with parameter component */
-						_parameters_manager.handle_message(&msg);
-
-						if (_mavlink->ftp_enabled()) {
-							/* handle packet with ftp component */
-							_mavlink_ftp.handle_message(&msg);
-						}
-
-						/* handle packet with log component */
-						_mavlink_log_handler.handle_message(&msg);
-
-						/* handle packet with timesync component */
-						_mavlink_timesync.handle_message(&msg);
-
-						/* handle packet with parent object */
-						_mavlink->handle_message(&msg);
-					}
-				}
-
-				/* count received bytes (nread will be -1 on read error) */
-				if (nread > 0) {
-					_mavlink->count_rxbytes(nread);
-				}
-
-#if defined(MAVLINK_UDP)
-			}
-
-#endif // MAVLINK_UDP
-
-		} else if (ret == -1) {
-			usleep(10000);
-		}
-
-		hrt_abstime t = hrt_absolute_time();
-
-		if (t - last_send_update > timeout * 1000) {
-			_mission_manager.check_active_mission();
-			_mission_manager.send(t);
-
-			_parameters_manager.send(t);
-
-			if (_mavlink->ftp_enabled()) {
-				_mavlink_ftp.send(t);
-			}
-
-			_mavlink_log_handler.send(t);
-			last_send_update = t;
-		}
-
-		if (_tune_publisher != nullptr) {
-			_tune_publisher->publish_next_tune(t);
-		}
+	if (_tune_publisher != nullptr) {
+		_tune_publisher->publish_next_tune(hrt_absolute_time());
 	}
-}
-
-void *
-MavlinkReceiver::start_helper(void *context)
-{
-	MavlinkReceiver rcv{(Mavlink *)context};
-	rcv.Run();
-
-	return nullptr;
-}
-
-void
-MavlinkReceiver::receive_start(pthread_t *thread, Mavlink *parent)
-{
-	pthread_attr_t receiveloop_attr;
-	pthread_attr_init(&receiveloop_attr);
-
-	struct sched_param param;
-	(void)pthread_attr_getschedparam(&receiveloop_attr, &param);
-	param.sched_priority = SCHED_PRIORITY_MAX - 80;
-	(void)pthread_attr_setschedparam(&receiveloop_attr, &param);
-
-	pthread_attr_setstacksize(&receiveloop_attr,
-				  PX4_STACK_ADJUSTED(sizeof(MavlinkReceiver) + 2840 + MAVLINK_RECEIVER_NET_ADDED_STACK));
-
-	pthread_create(thread, &receiveloop_attr, MavlinkReceiver::start_helper, (void *)parent);
-
-	pthread_attr_destroy(&receiveloop_attr);
 }

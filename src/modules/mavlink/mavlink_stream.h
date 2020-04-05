@@ -78,7 +78,7 @@ public:
 	/**
 	 * @return 0 if updated / sent, -1 if unchanged
 	 */
-	int update(const hrt_abstime &t);
+	int update();
 	virtual const char *get_name() const = 0;
 	virtual uint16_t get_id() = 0;
 

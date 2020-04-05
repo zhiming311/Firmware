@@ -41,10 +41,6 @@
 
 #pragma once
 
-#include "mavlink_ftp.h"
-#include "mavlink_log_handler.h"
-#include "mavlink_mission.h"
-#include "mavlink_parameters.h"
 #include "mavlink_timesync.h"
 #include "tune_publisher.h"
 
@@ -111,12 +107,7 @@ public:
 	MavlinkReceiver(Mavlink *parent);
 	~MavlinkReceiver() override;
 
-	/**
-	 * Start the receiver thread
-	 */
-	static void receive_start(pthread_t *thread, Mavlink *parent);
-
-	static void *start_helper(void *context);
+	void update();
 
 private:
 
@@ -180,9 +171,6 @@ private:
 	void handle_message_vision_position_estimate(mavlink_message_t *msg);
 	void handle_message_onboard_computer_status(mavlink_message_t *msg);
 
-
-	void Run();
-
 	/**
 	 * Set the interval at which the given message stream is published.
 	 * The rate is the number of messages per second.
@@ -219,10 +207,6 @@ private:
 
 	Mavlink				*_mavlink;
 
-	MavlinkFTP			_mavlink_ftp;
-	MavlinkLogHandler		_mavlink_log_handler;
-	MavlinkMissionManager		_mission_manager;
-	MavlinkParametersManager	_parameters_manager;
 	MavlinkTimesync			_mavlink_timesync;
 
 	mavlink_status_t		_status{}; ///< receiver status, used for mavlink_parse_char()
