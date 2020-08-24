@@ -107,7 +107,6 @@ private:
 	void Run() override;
 
 	int getRangeSubIndex(); ///< get subscription index of first downward-facing range sensor
-	void fillGpsMsgWithVehicleGpsPosData(gps_message &msg, const vehicle_gps_position_s &data);
 
 	PreFlightChecker _preflt_checker;
 	void runPreFlightChecks(float dt, const filter_control_status_u &control_status,
@@ -878,8 +877,23 @@ void Ekf2::Run()
 
 			if (_vehicle_gps_position_sub.copy(&gps)) {
 				gps_message gps_msg{};
-
-				fillGpsMsgWithVehicleGpsPosData(gps_msg, gps);
+				gps_msg.time_usec = gps.timestamp;
+				gps_msg.lat = gps.lat;
+				gps_msg.lon = gps.lon;
+				gps_msg.alt = gps.alt;
+				gps_msg.yaw = gps.heading;
+				gps_msg.yaw_offset = gps.heading_offset;
+				gps_msg.fix_type = gps.fix_type;
+				gps_msg.eph = gps.eph;
+				gps_msg.epv = gps.epv;
+				gps_msg.sacc = gps.s_variance_m_s;
+				gps_msg.vel_m_s = gps.vel_m_s;
+				gps_msg.vel_ned(0) = gps.vel_n_m_s;
+				gps_msg.vel_ned(1) = gps.vel_e_m_s;
+				gps_msg.vel_ned(2) = gps.vel_d_m_s;
+				gps_msg.vel_ned_valid = gps.vel_ned_valid;
+				gps_msg.nsats = gps.satellites_used;
+				gps_msg.pdop = sqrtf(gps.hdop * gps.hdop + gps.vdop * gps.vdop);
 
 				_ekf.setGpsData(gps_msg);
 
@@ -1606,27 +1620,6 @@ void Ekf2::Run()
 
 		px4_lockstep_progress(_lockstep_component);
 	}
-}
-
-void Ekf2::fillGpsMsgWithVehicleGpsPosData(gps_message &msg, const vehicle_gps_position_s &data)
-{
-	msg.time_usec = data.timestamp;
-	msg.lat = data.lat;
-	msg.lon = data.lon;
-	msg.alt = data.alt;
-	msg.yaw = data.heading;
-	msg.yaw_offset = data.heading_offset;
-	msg.fix_type = data.fix_type;
-	msg.eph = data.eph;
-	msg.epv = data.epv;
-	msg.sacc = data.s_variance_m_s;
-	msg.vel_m_s = data.vel_m_s;
-	msg.vel_ned(0) = data.vel_n_m_s;
-	msg.vel_ned(1) = data.vel_e_m_s;
-	msg.vel_ned(2) = data.vel_d_m_s;
-	msg.vel_ned_valid = data.vel_ned_valid;
-	msg.nsats = data.satellites_used;
-	msg.pdop = sqrtf(data.hdop * data.hdop + data.vdop * data.vdop);
 }
 
 void Ekf2::runPreFlightChecks(const float dt,
