@@ -61,11 +61,6 @@
 namespace sensors
 {
 
-static constexpr uint8_t GYRO_COUNT_MAX = 3;
-static constexpr uint8_t ACCEL_COUNT_MAX = 3;
-
-static constexpr uint8_t SENSOR_COUNT_MAX = math::max(GYRO_COUNT_MAX, ACCEL_COUNT_MAX);
-
 /**
  ** class VotedSensorsUpdate
  *
@@ -78,7 +73,7 @@ public:
 	 * @param parameters parameter values. These do not have to be initialized when constructing this object.
 	 * Only when calling init(), they have to be initialized.
 	 */
-	VotedSensorsUpdate(bool hil_enabled, uORB::SubscriptionCallbackWorkItem(&vehicle_imu_sub)[3]);
+	VotedSensorsUpdate(bool hil_enabled, uORB::SubscriptionCallbackWorkItem(&vehicle_imu_sub)[4]);
 
 	/**
 	 * initialize subscriptions etc.
@@ -112,15 +107,15 @@ public:
 
 private:
 
-	static constexpr uint8_t ACCEL_COUNT_MAX = 3;
-	static constexpr uint8_t GYRO_COUNT_MAX = 3;
+	static constexpr uint8_t ACCEL_COUNT_MAX = 4;
+	static constexpr uint8_t GYRO_COUNT_MAX = 4;
 	static constexpr uint8_t SENSOR_COUNT_MAX = math::max(ACCEL_COUNT_MAX, GYRO_COUNT_MAX);
 
 	static constexpr uint8_t DEFAULT_PRIORITY = 50;
 
 	struct SensorData {
 		SensorData() = delete;
-		explicit SensorData(ORB_ID meta) : subscription{{meta, 0}, {meta, 1}, {meta, 2}} {}
+		explicit SensorData(ORB_ID meta) : subscription{{meta, 0}, {meta, 1}, {meta, 2}, {meta, 3}} {}
 
 		uORB::Subscription subscription[SENSOR_COUNT_MAX]; /**< raw sensor data subscription */
 		DataValidatorGroup voter{1};
@@ -167,7 +162,7 @@ private:
 	uORB::Publication<sensor_selection_s> _sensor_selection_pub{ORB_ID(sensor_selection)};	/**< handle to the sensor selection uORB topic */
 	uORB::Publication<sensors_status_imu_s> _sensors_status_imu_pub{ORB_ID(sensors_status_imu)};
 
-	uORB::SubscriptionCallbackWorkItem(&_vehicle_imu_sub)[3];
+	uORB::SubscriptionCallbackWorkItem(&_vehicle_imu_sub)[4];
 	uORB::SubscriptionMultiArray<vehicle_imu_status_s, ACCEL_COUNT_MAX> _vehicle_imu_status_subs{ORB_ID::vehicle_imu_status};
 
 	sensor_combined_s _last_sensor_data[SENSOR_COUNT_MAX] {};	/**< latest sensor data from all sensors instances */
