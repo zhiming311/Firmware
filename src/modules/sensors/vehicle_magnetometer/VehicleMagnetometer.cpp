@@ -42,8 +42,6 @@ namespace sensors
 using namespace matrix;
 using namespace time_literals;
 
-static constexpr int32_t MAG_ROT_VAL_INTERNAL{-1};
-
 static constexpr uint32_t SENSOR_TIMEOUT{300_ms};
 
 VehicleMagnetometer::VehicleMagnetometer() :
