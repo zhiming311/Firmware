@@ -39,6 +39,7 @@ add_library(drivers_board
 	manifest.c
 	sdio.c
 	spi.cpp
+	netconf.cpp
 	timer_config.cpp
 	usb.c
 )
