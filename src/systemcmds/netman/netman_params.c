@@ -32,39 +32,49 @@
  ****************************************************************************/
 
 /**
- * @file netconf.cpp
- *
- * PX4FMU interface to provide a network configuration
+ * NetMan Interface 0 Proto
+ * @group Network
+ * @min 1
+ * @max 3
+ * @value 1 DHCP
+ * @value 2 Static
+ * @value 3 Both - fall back to static
+ * @reboot_required true
  */
+PARAM_DEFINE_INT32(NET_I0_PROTO, 2);
 
-/****************************************************************************
- * Included Files
- ****************************************************************************/
+/**
+ * NetMan Interface 0 IP
+ * @group Network
+ * @min 0
+ * @max 4294967295
+ * @reboot_required true
+ */
+PARAM_DEFINE_INT32(NET_I0_IP, 3232235643);
 
-#include "board_config.h"
+/**
+ * NetMan Interface 0 Net Mask
+ * @group Network
+ * @min 0
+ * @max 4294967295
+ * @reboot_required true
+ */
+PARAM_DEFINE_INT32(NET_I0_MASK, 4294967040);
 
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
-#include <debug.h>
-#include <errno.h>
+/**
+ * NetMan Interface 0 Default Router
+ * @group Network
+ * @min 0
+ * @max 4294967295
+ * @reboot_required true
+ */
+PARAM_DEFINE_INT32(NET_I0_DR_IP, 3232235774);
 
-#include <nuttx/config.h>
-#include <nuttx/board.h>
-#include <sys/boardctl.h>
-
-/****************************************************************************
- * Pre-Processor Definitions
- ****************************************************************************/
-
-
-__EXPORT int board_get_netconf(struct boardioc_netconf_s *netconf)
-{
-	netconf->flags = BOARDIOC_NETCONF_FALLBACK;
-	netconf->ipaddr         = 0XC0A8007B;
-	netconf->netmask        = 0Xffffff00;
-	netconf->dnsaddr        = 0XC0A800fe;
-	netconf->default_router = 0XC0A800fe;
-
-	return OK;
-}
+/**
+ * NetMan Interface 0 DNS Server
+ * @group Network
+ * @min 0
+ * @max 4294967295
+ * @reboot_required true
+ */
+PARAM_DEFINE_INT32(NET_I0_DNS_IP, 3232235774);

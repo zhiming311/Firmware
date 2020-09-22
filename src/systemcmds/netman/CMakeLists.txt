@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2016 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2020 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,26 +30,9 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
-
-add_library(drivers_board
-	can.c
-	i2c.cpp
-	init.c
-	led.c
-	manifest.c
-	sdio.c
-	spi.cpp
-	timer_config.cpp
-	usb.c
-)
-add_dependencies(drivers_board arch_board_hw_info)
-
-target_link_libraries(drivers_board
-	PRIVATE
-		arch_spi
-		arch_board_hw_info
-		drivers__led # drv_led_start
-		nuttx_arch # sdio
-		nuttx_drivers # sdio
-		px4_layer
-)
+px4_add_module(
+	MODULE modules__netman
+	MAIN netman
+	SRCS
+		netman.cpp
+	)
