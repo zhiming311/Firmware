@@ -226,7 +226,7 @@ class GzmodelspawnRunner(Runner):
         self.cmd = "gz"
         self.args = ["model", "--spawn-file", workspace_dir +
                      "/Tools/sitl_gazebo/models/" +
-                     self.model + "/" + self.model + ".sdf",
+                     self.model + "/" + self.model + "-gen.sdf",
                      "--model-name", self.model,
                      "-x", "1.01", "-y", "0.98", "-z", "0.83"]
 
