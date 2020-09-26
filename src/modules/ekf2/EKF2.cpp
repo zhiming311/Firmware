@@ -194,22 +194,18 @@ EKF2::EKF2(int instance, const px4::wq_config_t &config, int imu, int mag, bool 
 
 EKF2::~EKF2()
 {
-	px4_lockstep_unregister_component(_lockstep_component);
+	if (!_multi_mode) {
+		px4_lockstep_unregister_component(_lockstep_component);
+	}
+
 	perf_free(_ekf_update_perf);
 }
 
 int EKF2::print_status()
 {
-	if (_multi_mode) {
-		PX4_INFO_RAW("\nEKF2 Instance: %d\n", _instance);
-	}
-
-	PX4_INFO("attitude:        %s", (_ekf.attitude_valid()) ? "valid" : "invalid");
-	PX4_INFO("local position:  %s", (_ekf.local_position_is_valid()) ? "valid" : "invalid");
-	PX4_INFO("global position: %s", (_ekf.global_position_is_valid()) ? "valid" : "invalid");
-
+	PX4_INFO_RAW("ekf2:%d attitude: %d, local position: %d, global position: %d\n", _instance, _ekf.attitude_valid(),
+		     _ekf.local_position_is_valid(), _ekf.global_position_is_valid());
 	perf_print_counter(_ekf_update_perf);
-
 	return 0;
 }
 
@@ -1206,13 +1202,13 @@ void EKF2::Run()
 		if (!_multi_mode) {
 			// publish ekf2_timestamps
 			_ekf2_timestamps_pub.publish(ekf2_timestamps);
-		}
 
-		if (_lockstep_component == -1) {
-			_lockstep_component = px4_lockstep_register_component();
-		}
+			if (_lockstep_component == -1) {
+				_lockstep_component = px4_lockstep_register_component();
+			}
 
-		px4_lockstep_progress(_lockstep_component);
+			px4_lockstep_progress(_lockstep_component);
+		}
 	}
 }
 
@@ -1509,6 +1505,8 @@ int EKF2::task_spawn(int argc, char *argv[])
 		}
 	}
 
+	PX4_INFO("startup finished");
+
 	return success ? PX4_OK : PX4_ERROR;
 }
 
@@ -1567,6 +1565,7 @@ extern "C" __EXPORT int ekf2_main(int argc, char *argv[])
 
 			for (int i = 0; i < EKF2_MAX_INSTANCES; i++) {
 				if (_objects[i].load()) {
+					PX4_INFO_RAW("\n");
 					_objects[i].load()->print_status();
 				}
 			}
